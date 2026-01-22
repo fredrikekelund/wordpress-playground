@@ -19,6 +19,7 @@ import { setSiteManagerOpen } from '../../lib/state/redux/slice-ui';
 import { SiteManagerIcon } from '@wp-playground/components';
 import { SavedPlaygroundsOverlay } from '../saved-playgrounds-overlay';
 import { SaveStatusIndicator } from './save-status-indicator';
+import { SharingStatusIndicator } from './sharing-status-indicator';
 
 interface BrowserChromeProps {
 	children?: React.ReactNode;
@@ -74,6 +75,8 @@ export default function BrowserChrome({
 					<div className={css.saveStatusSlot}>
 						<SaveStatusIndicator />
 					</div>
+
+					<SharingStatusIndicator />
 
 					<div className={css.toolbarButtons}>
 						<Button
