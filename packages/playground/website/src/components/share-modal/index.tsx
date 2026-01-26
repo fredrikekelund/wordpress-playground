@@ -69,7 +69,7 @@ export function ShareModal() {
 	}, [updateFromSharingStatus]);
 
 	const handleStartSharing = async () => {
-		if (!playground) {
+		if (!playground || !clientInfo) {
 			setError('Playground is not ready');
 			return;
 		}
@@ -78,7 +78,7 @@ export function ShareModal() {
 		setError(null);
 
 		try {
-			const url = await startSharing(playground);
+			const url = await startSharing(playground, clientInfo.siteSlug);
 			setShareUrl(url);
 			setShareState('sharing');
 		} catch (err) {
@@ -178,8 +178,8 @@ export function ShareModal() {
 							}}
 						>
 							You can close this modal - sharing will continue in
-							the background. Look for the sharing indicator in the
-							toolbar.
+							the background. Look for the sharing indicator in
+							the toolbar.
 						</p>
 					</>
 				)}

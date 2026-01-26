@@ -1365,6 +1365,7 @@ export class PHP implements Disposable {
 	 * @param runtime
 	 */
 	async hotSwapPHPRuntime(runtime: number) {
+		console.log('hotSwapPHPRuntime');
 		// Once we secure the lock and have the new runtime ready,
 		// the rest of the swap handler is synchronous to make sure
 		// no other operations acts on the old runtime or FS.

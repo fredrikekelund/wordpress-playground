@@ -52,7 +52,8 @@ export function subscribeToSharingStatus(
  * Start a sharing session.
  */
 export async function startSharing(
-	playgroundClient: PlaygroundClient
+	playgroundClient: PlaygroundClient,
+	scope: string
 ): Promise<string> {
 	if (tunnelHost) {
 		// Already sharing - return existing URL
@@ -63,7 +64,7 @@ export async function startSharing(
 	}
 
 	const relayUrl = window.location.origin;
-	tunnelHost = new TunnelHost(playgroundClient, relayUrl);
+	tunnelHost = new TunnelHost(playgroundClient, relayUrl, scope);
 
 	tunnelHost.on('statusChange', (status) => {
 		console.log('[SharingService] Status changed:', status);

@@ -36,11 +36,19 @@ export interface TunnelSession {
 	hostConnected: boolean;
 	pendingRequests: Map<string, QueuedRequest>;
 	pollResolvers: Array<(request: TunnelRequest | null) => void>;
+	/** The scope (site slug) of the host's Playground instance */
+	scope: string;
 }
 
 export interface CreateSessionResponse {
 	sessionId: string;
 	shareUrl: string;
+	scope: string;
+}
+
+export interface GetSessionInfoResponse {
+	scope: string;
+	hostConnected: boolean;
 }
 
 export interface PollResponse {

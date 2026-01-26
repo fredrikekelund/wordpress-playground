@@ -2,7 +2,7 @@ import type { PHPLoaderModule } from '@php-wasm/universal';
 import { jspi } from 'wasm-feature-detect';
 
 export async function getPHPLoaderModule(): Promise<PHPLoaderModule> {
-	if (await jspi()) {
+	if (0 && (await jspi())) {
 		// @ts-ignore
 		return await import('../jspi/php_8_3.js');
 	} else {

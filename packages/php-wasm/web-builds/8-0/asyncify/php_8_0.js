@@ -1,6 +1,6 @@
 import dependencyFilename from './8_0_30/php_8_0.wasm';
 export { dependencyFilename };
-export const dependenciesTotalSize = 20682557;
+export const dependenciesTotalSize = 20682555;
 const phpVersionString = '8.0.30';
 export function init(RuntimeName, PHPLoader) {
 	// The rest of the code comes from the built php.js file and esm-suffix.js
@@ -10611,7 +10611,7 @@ export function init(RuntimeName, PHPLoader) {
 	_emscripten_console_warn.sig = 'vp';
 	var _emscripten_err = (str) => err(UTF8ToString(str));
 	_emscripten_err.sig = 'vp';
-	var getHeapMax = () => 2147483648;
+	var getHeapMax = () => 805306368;
 	var _emscripten_get_heap_max = () => getHeapMax();
 	_emscripten_get_heap_max.sig = 'p';
 	var GLctx;
@@ -24689,6 +24689,9 @@ export function init(RuntimeName, PHPLoader) {
 	Module['addRunDependency'] = addRunDependency;
 	Module['removeRunDependency'] = removeRunDependency;
 	Module['ccall'] = ccall;
+	Module['UTF8ToString'] = UTF8ToString;
+	Module['stringToUTF8'] = stringToUTF8;
+	Module['lengthBytesUTF8'] = lengthBytesUTF8;
 	Module['FS_preloadFile'] = FS_preloadFile;
 	Module['FS_unlink'] = FS_unlink;
 	Module['FS_createPath'] = FS_createPath;

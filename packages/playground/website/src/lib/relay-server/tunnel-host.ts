@@ -134,7 +134,8 @@ export class TunnelHost {
 
 	constructor(
 		private playgroundClient: PlaygroundClient,
-		private relayUrl: string
+		private relayUrl: string,
+		private scope: string
 	) {}
 
 	/**
@@ -150,6 +151,10 @@ export class TunnelHost {
 		try {
 			const response = await fetch(`${this.relayUrl}/relay/session`, {
 				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ scope: this.scope }),
 			});
 
 			if (!response.ok) {
@@ -202,7 +207,9 @@ export class TunnelHost {
 	 */
 	private async processQueue(): Promise<void> {
 		if (this.isProcessingRequest) {
-			console.log('[TunnelHost] Queue processor already running, request will be processed in turn');
+			console.log(
+				'[TunnelHost] Queue processor already running, request will be processed in turn'
+			);
 			return;
 		}
 		if (this.requestQueue.length === 0) {
@@ -214,12 +221,19 @@ export class TunnelHost {
 
 		while (this.requestQueue.length > 0 && this.isActive) {
 			const request = this.requestQueue.shift()!;
-			console.log(`[TunnelHost] Processing request ${request.requestId} for ${request.path}, queue length: ${this.requestQueue.length}`);
+			console.log(
+				`[TunnelHost] Processing request ${request.requestId} for ${request.path}, queue length: ${this.requestQueue.length}`
+			);
 			try {
 				await this.handleRequest(request);
-				console.log(`[TunnelHost] Completed request ${request.requestId}`);
+				console.log(
+					`[TunnelHost] Completed request ${request.requestId}`
+				);
 			} catch (error) {
-				console.error(`[TunnelHost] Error handling request ${request.requestId}:`, error);
+				console.error(
+					`[TunnelHost] Error handling request ${request.requestId}:`,
+					error
+				);
 				this.emit('error', error as Error);
 			}
 		}
@@ -302,7 +316,9 @@ export class TunnelHost {
 				if (!response.ok) {
 					if (response.status === 404) {
 						// Session expired
-						console.log('[TunnelHost] Session expired or not found');
+						console.log(
+							'[TunnelHost] Session expired or not found'
+						);
 						this.emit(
 							'error',
 							new Error('Session expired or not found')
@@ -325,10 +341,15 @@ export class TunnelHost {
 				}
 
 				if (data.request) {
-					console.log(`[TunnelHost] Received request ${data.request.requestId} for ${data.request.path}`);
+					console.log(
+						`[TunnelHost] Received request ${data.request.requestId} for ${data.request.path}`
+					);
 					// Process request in background - don't wait, keep polling
 					this.handleRequest(data.request).catch((error) => {
-						console.error(`[TunnelHost] Error handling request:`, error);
+						console.error(
+							`[TunnelHost] Error handling request:`,
+							error
+						);
 					});
 				}
 			} catch (error) {
@@ -345,7 +366,10 @@ export class TunnelHost {
 				// Keep polling - don't give up on transient errors
 			}
 		}
-		console.log('[TunnelHost] Polling loop exited, isActive:', this.isActive);
+		console.log(
+			'[TunnelHost] Polling loop exited, isActive:',
+			this.isActive
+		);
 	}
 
 	/**
@@ -354,25 +378,43 @@ export class TunnelHost {
 	private async handleRequest(tunnelRequest: TunnelRequest): Promise<void> {
 		const startTime = Date.now();
 		try {
+			// Prepend the scope to the request path if not already present
+			// The host's WordPress is configured with this scope
+			let requestPath = tunnelRequest.path;
+			const scopePrefix = `/${this.scope}`;
+			if (this.scope && !requestPath.startsWith(scopePrefix)) {
+				requestPath = scopePrefix + requestPath;
+				console.log(
+					`[TunnelHost] Prepended scope to path: ${tunnelRequest.path} -> ${requestPath}`
+				);
+			}
+
 			// Convert tunnel request to PHPRequest format
 			const phpRequest = {
 				method: tunnelRequest.method as any,
-				url: tunnelRequest.path,
+				url: requestPath,
 				headers: tunnelRequest.headers,
 				body: tunnelRequest.body
 					? new TextEncoder().encode(tunnelRequest.body)
 					: undefined,
 			};
 
-			console.log(`[TunnelHost] Calling playgroundClient.request for ${tunnelRequest.path}`);
+			console.log(
+				`[TunnelHost] Calling playgroundClient.request for ${tunnelRequest.path}`
+			);
 			// Process through Playground with a timeout to prevent hanging
 			const phpResponse = await Promise.race([
 				this.playgroundClient.request(phpRequest),
 				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new Error('PHP request timeout')), 25000)
+					setTimeout(
+						() => reject(new Error('PHP request timeout')),
+						25000
+					)
 				),
 			]);
-			console.log(`[TunnelHost] playgroundClient.request completed in ${Date.now() - startTime}ms, status: ${phpResponse.httpStatusCode}`);
+			console.log(
+				`[TunnelHost] playgroundClient.request completed in ${Date.now() - startTime}ms, status: ${phpResponse.httpStatusCode}`
+			);
 
 			// Convert headers from Record<string, string[]> to Record<string, string>
 			// and rewrite Location headers for redirects to go through the relay
@@ -385,7 +427,9 @@ export class TunnelHost {
 				if (key.toLowerCase() === 'location' && value) {
 					if (value.startsWith('/') && !value.startsWith('/relay/')) {
 						value = `${relayPrefix}${value}`;
-						console.log(`[TunnelHost] Rewrote Location header to: ${value}`);
+						console.log(
+							`[TunnelHost] Rewrote Location header to: ${value}`
+						);
 					}
 				}
 
@@ -458,9 +502,13 @@ export class TunnelHost {
 		);
 
 		if (!res.ok) {
-			console.error(`[TunnelHost] Failed to send response: ${res.statusText}`);
+			console.error(
+				`[TunnelHost] Failed to send response: ${res.statusText}`
+			);
 			throw new Error(`Failed to send response: ${res.statusText}`);
 		}
-		console.log(`[TunnelHost] Response sent successfully for ${response.requestId}`);
+		console.log(
+			`[TunnelHost] Response sent successfully for ${response.requestId}`
+		);
 	}
 }

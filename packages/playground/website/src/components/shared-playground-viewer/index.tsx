@@ -12,36 +12,79 @@ export function SharedPlaygroundViewer({
 }: SharedPlaygroundViewerProps) {
 	const [status, setStatus] = useState<ConnectionStatus>('connecting');
 	const [error, setError] = useState<string | null>(null);
+	const [scope, setScope] = useState<string>('');
 	const iframeRef = useRef<HTMLIFrameElement>(null);
 
-	// The relay request URL for this session
-	const relayBaseUrl = `${window.location.origin}/relay/${sessionId}/request`;
-
-	// Check if the session is valid by making a test request
+	// Check if the session is valid and register the scope with the service worker
 	useEffect(() => {
+		let mounted = true;
+		let registeredScope: string | null = null;
+
 		const checkSession = async () => {
 			try {
-				// Try to reach the host through the relay
-				const response = await fetch(`${relayBaseUrl}/`, {
-					method: 'GET',
-					headers: {
-						Accept: 'text/html',
-					},
-				});
+				// Fetch session info to check host connection and get scope
+				const infoResponse = await fetch(
+					`${window.location.origin}/relay/${sessionId}/info`
+				);
 
-				if (response.ok) {
-					setStatus('connected');
-				} else if (response.status === 503) {
-					setError('The host is not connected. Please try again later.');
+				if (!infoResponse.ok) {
+					if (infoResponse.status === 404) {
+						setError(
+							'This sharing session has expired or does not exist.'
+						);
+					} else {
+						setError(
+							`Connection failed: ${infoResponse.statusText}`
+						);
+					}
 					setStatus('error');
-				} else if (response.status === 404) {
-					setError('This sharing session has expired or does not exist.');
-					setStatus('error');
-				} else {
-					setError(`Connection failed: ${response.statusText}`);
-					setStatus('error');
+					return;
 				}
+
+				const sessionInfo = await infoResponse.json();
+
+				if (!sessionInfo.hostConnected) {
+					setError(
+						'The host is not connected. Please try again later.'
+					);
+					setStatus('error');
+					return;
+				}
+
+				// Register this scope with the service worker as relay-backed
+				if (navigator.serviceWorker?.controller) {
+					// Use MessageChannel for request-response pattern
+					const messageChannel = new MessageChannel();
+					const registrationPromise = new Promise<void>((resolve) => {
+						messageChannel.port1.onmessage = (event) => {
+							if (event.data?.success) {
+								resolve();
+							}
+						};
+					});
+
+					navigator.serviceWorker.controller.postMessage(
+						{
+							type: 'register-relay-scope',
+							scope: sessionInfo.scope,
+							sessionId: sessionId,
+						},
+						[messageChannel.port2]
+					);
+
+					registeredScope = sessionInfo.scope;
+
+					// Wait for service worker to confirm registration
+					await registrationPromise;
+				}
+
+				if (!mounted) return;
+
+				// Store the scope and mark as connected
+				setScope(sessionInfo.scope);
+				setStatus('connected');
 			} catch (err) {
+				if (!mounted) return;
 				setError(
 					'Unable to connect to the shared Playground. Please check your connection.'
 				);
@@ -50,7 +93,18 @@ export function SharedPlaygroundViewer({
 		};
 
 		checkSession();
-	}, [relayBaseUrl]);
+
+		// Cleanup: unregister the scope when component unmounts
+		return () => {
+			mounted = false;
+			if (registeredScope && navigator.serviceWorker?.controller) {
+				navigator.serviceWorker.controller.postMessage({
+					type: 'unregister-relay-scope',
+					scope: registeredScope,
+				});
+			}
+		};
+	}, [sessionId]);
 
 	const handleIframeLoad = useCallback(() => {
 		setStatus('connected');
@@ -60,8 +114,8 @@ export function SharedPlaygroundViewer({
 		setStatus('connecting');
 		setError(null);
 		// Force iframe reload
-		if (iframeRef.current) {
-			iframeRef.current.src = `${relayBaseUrl}/`;
+		if (iframeRef.current && scope) {
+			iframeRef.current.src = `/scope:${scope}/`;
 		}
 	};
 
@@ -82,10 +136,7 @@ export function SharedPlaygroundViewer({
 						</span>
 					)}
 				</div>
-				<a
-					href="/"
-					className={css.createOwnButton}
-				>
+				<a href="/" className={css.createOwnButton}>
 					Create your own Playground
 				</a>
 			</div>
@@ -119,10 +170,10 @@ export function SharedPlaygroundViewer({
 				</div>
 			)}
 
-			{(status === 'connected' || status === 'connecting') && (
+			{(status === 'connected' || status === 'connecting') && scope && (
 				<iframe
 					ref={iframeRef}
-					src={`${relayBaseUrl}/`}
+					src={`/scope:${scope}/`}
 					className={css.iframe}
 					onLoad={handleIframeLoad}
 					title="Shared WordPress Playground"

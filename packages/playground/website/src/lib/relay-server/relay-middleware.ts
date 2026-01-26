@@ -134,6 +134,15 @@ export function createRelayMiddleware(
 
 		// POST /relay/session - Create new session
 		if (req.method === 'POST' && url === '/relay/session') {
+			const body = await parseBody(req);
+			let scope = '';
+			try {
+				const requestData = JSON.parse(body);
+				scope = requestData.scope || '';
+			} catch (e) {
+				// If parsing fails or no scope provided, use empty string
+			}
+
 			const sessionId = generateSessionId();
 			const session: TunnelSession = {
 				sessionId,
@@ -142,14 +151,40 @@ export function createRelayMiddleware(
 				hostConnected: false,
 				pendingRequests: new Map(),
 				pollResolvers: [],
+				scope,
 			};
 			sessions.set(sessionId, session);
 
 			const protocol = req.headers['x-forwarded-proto'] || 'http';
 			const host = req.headers.host || 'localhost';
-			const shareUrl = `${protocol}://${host}${basePath}?share=${sessionId}`;
+			// Share URL points to root path (proxied to remote.html in dev)
+			// In development, basePath is /website-server/ but guests should access the root
+			const shareUrl = `${protocol}://${host}/?share=${sessionId}`;
 
-			const response: CreateSessionResponse = { sessionId, shareUrl };
+			const response: CreateSessionResponse = {
+				sessionId,
+				shareUrl,
+				scope,
+			};
+			sendJson(res, 200, response);
+			return;
+		}
+
+		// GET /relay/:sessionId/info - Get session info (scope, status)
+		const infoMatch = url.match(/^\/relay\/([^/]+)\/info$/);
+		if (req.method === 'GET' && infoMatch) {
+			const sessionId = infoMatch[1];
+			const session = getSession(sessionId);
+
+			if (!session) {
+				sendError(res, 404, 'Session not found');
+				return;
+			}
+
+			const response: import('./types').GetSessionInfoResponse = {
+				scope: session.scope,
+				hostConnected: session.hostConnected,
+			};
 			sendJson(res, 200, response);
 			return;
 		}
@@ -162,16 +197,14 @@ export function createRelayMiddleware(
 
 			if (!session) {
 				console.log(`[Relay] Poll: session ${sessionId} not found`);
-				sendError(
-					res,
-					404,
-					'Session not found'
-				);
+				sendError(res, 404, 'Session not found');
 				return;
 			}
 
 			session.hostConnected = true;
-			console.log(`[Relay] Poll: session ${sessionId}, pending requests: ${session.pendingRequests.size}`);
+			console.log(
+				`[Relay] Poll: session ${sessionId}, pending requests: ${session.pendingRequests.size}`
+			);
 
 			// Check if there are pending requests that haven't been dispatched yet
 			const pendingRequest = Array.from(
@@ -232,21 +265,13 @@ export function createRelayMiddleware(
 			const session = getSession(sessionId);
 
 			if (!session) {
-				sendError(
-					res,
-					404,
-					'Session not found'
-				);
+				sendError(res, 404, 'Session not found');
 				return;
 			}
 
 			const queued = session.pendingRequests.get(requestId);
 			if (!queued) {
-				sendError(
-					res,
-					404,
-					'Request not found'
-				);
+				sendError(res, 404, 'Request not found');
 				return;
 			}
 
@@ -268,25 +293,19 @@ export function createRelayMiddleware(
 			const path = requestMatch[2] || '/';
 			const session = getSession(sessionId);
 
-			console.log(`[Relay] Guest request: ${path} for session ${sessionId}`);
+			console.log(
+				`[Relay] Guest request: ${path} for session ${sessionId}`
+			);
 
 			if (!session) {
 				console.log(`[Relay] Guest request: session not found`);
-				sendError(
-					res,
-					404,
-					'Session not found'
-				);
+				sendError(res, 404, 'Session not found');
 				return;
 			}
 
 			if (!session.hostConnected) {
 				console.log(`[Relay] Guest request: host not connected`);
-				sendError(
-					res,
-					503,
-					'Host not connected'
-				);
+				sendError(res, 503, 'Host not connected');
 				return;
 			}
 
@@ -314,7 +333,9 @@ export function createRelayMiddleware(
 			const responsePromise = new Promise<TunnelResponse>(
 				(resolve, reject) => {
 					const timeoutId = setTimeout(() => {
-						console.log(`[Relay] Request ${requestId} timed out after ${REQUEST_TIMEOUT}ms`);
+						console.log(
+							`[Relay] Request ${requestId} timed out after ${REQUEST_TIMEOUT}ms`
+						);
 						session.pendingRequests.delete(requestId);
 						reject(new Error('Request timeout'));
 					}, REQUEST_TIMEOUT);
@@ -340,7 +361,9 @@ export function createRelayMiddleware(
 
 			try {
 				const tunnelResponse = await responsePromise;
-				console.log(`[Relay] Got response for ${requestId}: status ${tunnelResponse.status}`);
+				console.log(
+					`[Relay] Got response for ${requestId}: status ${tunnelResponse.status}`
+				);
 				const httpRes = res as import('http').ServerResponse;
 
 				httpRes.statusCode = tunnelResponse.status;
@@ -353,6 +376,7 @@ export function createRelayMiddleware(
 							'transfer-encoding',
 							'connection',
 							'keep-alive',
+							'content-length', // Will be recalculated after URL rewriting
 						].includes(key.toLowerCase())
 					) {
 						httpRes.setHeader(key, value);
@@ -371,11 +395,7 @@ export function createRelayMiddleware(
 					httpRes.end();
 				}
 			} catch (error) {
-				sendError(
-					res,
-					504,
-					'Gateway timeout'
-				);
+				sendError(res, 504, 'Gateway timeout');
 			}
 			return;
 		}

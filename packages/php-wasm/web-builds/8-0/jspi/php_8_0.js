@@ -1,6 +1,6 @@
 import dependencyFilename from './8_0_30/php_8_0.wasm';
 export { dependencyFilename };
-export const dependenciesTotalSize = 20235050;
+export const dependenciesTotalSize = 20235048;
 const phpVersionString = '8.0.30';
 export function init(RuntimeName, PHPLoader) {
 	// The rest of the code comes from the built php.js file and esm-suffix.js
@@ -13816,7 +13816,7 @@ export function init(RuntimeName, PHPLoader) {
 	var Asyncify = {
 		instrumentWasmImports(imports) {
 			var importPattern =
-				/^(js_open_process|js_fd_read|js_waitpid|js_process_status|js_create_input_device|wasm_setsockopt|wasm_shutdown|wasm_close|wasm_recv|__syscall_fcntl64|js_flock|js_release_file_locks|js_waitpid|invoke_.*|__asyncjs__.*)$/;
+				/^(js_open_process|js_fd_read|js_waitpid|js_process_status|js_create_input_device|wasm_setsockopt|wasm_shutdown|wasm_close|wasm_recv|__syscall_fcntl64|__emscripten_lookup_name|js_flock|js_release_file_locks|js_waitpid|invoke_.*|__asyncjs__.*)$/;
 			for (let [x, original] of Object.entries(imports)) {
 				if (typeof original == 'function') {
 					let isAsyncifyImport =
@@ -24466,6 +24466,9 @@ export function init(RuntimeName, PHPLoader) {
 	Module['addRunDependency'] = addRunDependency;
 	Module['removeRunDependency'] = removeRunDependency;
 	Module['ccall'] = ccall;
+	Module['UTF8ToString'] = UTF8ToString;
+	Module['stringToUTF8'] = stringToUTF8;
+	Module['lengthBytesUTF8'] = lengthBytesUTF8;
 	Module['FS_preloadFile'] = FS_preloadFile;
 	Module['FS_unlink'] = FS_unlink;
 	Module['FS_createPath'] = FS_createPath;

@@ -327,6 +327,59 @@ self.addEventListener('fetch', (event) => {
 	return event.respondWith(cacheFirstFetch(event.request));
 });
 
+// Registry of relay-backed scopes: scope -> sessionId
+const relayBackedScopes = new Map<string, string>();
+
+/**
+ * Register a scope as relay-backed, meaning requests should go through
+ * the relay server instead of to local PHP.
+ */
+self.addEventListener('message', (event) => {
+	if (event.data?.type === 'register-relay-scope') {
+		const { scope, sessionId } = event.data;
+		relayBackedScopes.set(scope, sessionId);
+		// Send confirmation back to the client
+		event.ports[0]?.postMessage({ success: true });
+	} else if (event.data?.type === 'unregister-relay-scope') {
+		const { scope } = event.data;
+		relayBackedScopes.delete(scope);
+	} else if (event.data?.type === 'SKIP_WAITING') {
+		// Activate the service worker immediately
+		self.skipWaiting();
+	}
+});
+
+/**
+ * Forward a request through the relay server to the host.
+ */
+async function handleRelayRequest(
+	event: FetchEvent,
+	scope: string,
+	sessionId: string
+): Promise<Response> {
+	const fullUrl = new URL(event.request.url);
+
+	// Build the relay URL: /relay/{sessionId}/request/{scopedPath}
+	// Keep the scope in the path so the relay knows where to route on the host
+	const relayUrl = new URL(
+		`/relay/${sessionId}/request${fullUrl.pathname}${fullUrl.search}`,
+		self.location.origin
+	);
+
+	// Clone the request with the relay URL
+	const relayRequest = new Request(relayUrl, {
+		method: event.request.method,
+		headers: event.request.headers,
+		body: event.request.body,
+		mode: 'same-origin',
+		credentials: 'same-origin',
+		cache: 'no-cache',
+		redirect: 'manual',
+	});
+
+	return fetch(relayRequest);
+}
+
 /**
  * A request to a PHP Worker Thread or to a regular static asset,
  * but initiated by a scoped referer (e.g. fetch() from a block editor iframe).
@@ -336,6 +389,13 @@ async function handleScopedRequest(event: FetchEvent, scope: string) {
 	const unscopedUrl = removeURLScope(fullUrl);
 	if (fullUrl.pathname.endsWith('/wp-includes/empty.html')) {
 		return emptyHtml(scope);
+	}
+
+	// Check if this scope is relay-backed
+	const sessionId = relayBackedScopes.get(scope);
+	if (sessionId) {
+		// Forward request through relay server
+		return handleRelayRequest(event, scope, sessionId);
 	}
 
 	const workerResponse = await convertFetchEventToPHPRequest(event);
