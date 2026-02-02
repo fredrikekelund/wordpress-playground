@@ -52,7 +52,10 @@ export default async function* packageJsonExecutor(
 		});
 	}
 
-	const monorepoDependencies = getMonorepoDependencies(context);
+	const monorepoDependencies = getMonorepoDependencies(
+		context,
+		options.excludedDependencies
+	);
 
 	// Read optional dependencies from the original package.json
 	let originalOptionalDependencies: Record<string, string> | undefined;
@@ -192,7 +195,8 @@ interface MonorepoDependency {
 }
 
 function getMonorepoDependencies(
-	context: ExecutorContext
+	context: ExecutorContext,
+	excludedDependencies?: string[]
 ): MonorepoDependency[] {
 	const monorepoDeps: MonorepoDependency[] = [];
 	for (const repoDep of context.projectGraph.dependencies[
@@ -217,6 +221,12 @@ function getMonorepoDependencies(
 			fs.readFileSync(packageJsonPath).toString()
 		);
 		if (packageJson.private) {
+			continue;
+		}
+		if (
+			excludedDependencies &&
+			excludedDependencies.includes(packageJson.name)
+		) {
 			continue;
 		}
 
