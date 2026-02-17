@@ -36,6 +36,7 @@ import {
 } from '../../../github/git-auth-helpers';
 import { findFirewallErrorInCauseChain } from './error-utils';
 import { PHPMYADMIN_INSTALL_PATH } from '@wp-playground/tools';
+import { registerWebMCPTools } from '../../webmcp';
 
 export function bootSiteClient(
 	siteSlug: string,
@@ -151,6 +152,7 @@ export function bootSiteClient(
 				onClientConnected: (playgroundClient) => {
 					playground = (window as any)['playground'] =
 						playgroundClient;
+					registerWebMCPTools(playgroundClient);
 				},
 				// Log Blueprint events
 				onBlueprintValidated: logBlueprintEvents,
