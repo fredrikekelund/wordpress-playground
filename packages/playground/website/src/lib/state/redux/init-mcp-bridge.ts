@@ -10,7 +10,7 @@ import {
 import { persistTemporarySite } from './persist-temporary-site';
 import { selectClientBySiteSlug } from './slice-clients';
 import type { McpBridgeHandle } from '@wp-playground/mcp/client';
-import { startMcpBridge } from '@wp-playground/mcp/client';
+import { startMcpBridge, registerWebMCPTools } from '@wp-playground/mcp/client';
 
 export const mcpListenerMiddleware = createListenerMiddleware();
 
@@ -26,7 +26,7 @@ startListening({
 		listenerApi.unsubscribe();
 
 		const { getState, dispatch } = listenerApi;
-		const handle: McpBridgeHandle = startMcpBridge({
+		const mcpConfig = {
 			getSites: () => {
 				const state = getState();
 				const allSites = selectAllSites(state);
@@ -71,7 +71,9 @@ startListening({
 					storage: updatedSite?.metadata.storage ?? 'none',
 				};
 			},
-		});
+		};
+		const handle: McpBridgeHandle = startMcpBridge(mcpConfig);
+		registerWebMCPTools(mcpConfig);
 
 		// Notify the bridge when site-related state changes so it
 		// can diff the site list and re-register when needed.
