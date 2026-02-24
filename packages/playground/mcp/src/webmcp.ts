@@ -7,15 +7,14 @@
  */
 
 import type { PlaygroundClient } from '@wp-playground/remote';
-import type { PHPResponseData } from '@php-wasm/universal';
 import {
 	toolDefinitions,
 	siteToolDefinitions,
 	presentStorage,
-	executeSiteInfo,
+	paramsToJsonSchema,
+	stringifyError,
 } from './tools/tool-definitions';
-import type { ToolParam } from './tools/tool-definitions';
-import { stringifyError } from './tools/utils';
+import { toolExecutors, createToolClient } from './tools/tool-executors';
 import type { PlaygroundConfig } from './bridge-client';
 
 // -- WebMCP type declarations --
@@ -48,132 +47,9 @@ declare global {
 	}
 }
 
-export type WebMcpConfig = PlaygroundConfig;
-
-// -- Schema conversion --
-
-function paramsToJsonSchema(params: ToolParam[]): Record<string, unknown> {
-	const properties: Record<string, Record<string, unknown>> = {};
-	const required: string[] = [];
-
-	for (const param of params) {
-		const prop: Record<string, unknown> = {
-			type: param.type,
-			description: param.description,
-		};
-		if (param.additionalProperties !== undefined) {
-			prop['additionalProperties'] = param.additionalProperties;
-		}
-		if (param.default !== undefined) {
-			prop['default'] = param.default;
-		}
-		properties[param.name] = prop;
-		if (param.required) {
-			required.push(param.name);
-		}
-	}
-
-	const schema: Record<string, unknown> = {
-		type: 'object',
-		properties,
-	};
-	if (required.length > 0) {
-		schema['required'] = required;
-	}
-	return schema;
-}
-
-// -- Client method mapping --
-
-function decodePHPResponse(response: PHPResponseData) {
-	return {
-		text: new TextDecoder().decode(response.bytes),
-		errors: response.errors,
-		exitCode: response.exitCode,
-	};
-}
-
-function decodeHTTPResponse(response: PHPResponseData) {
-	return {
-		text: new TextDecoder().decode(response.bytes),
-		httpStatusCode: response.httpStatusCode,
-		headers: response.headers,
-	};
-}
-
-const clientMethodMap: Record<
-	string,
-	(
-		client: PlaygroundClient,
-		input: Record<string, unknown>
-	) => Promise<unknown>
-> = {
-	playground_execute_php: async (client, input) =>
-		decodePHPResponse(await client.run({ code: input['code'] as string })),
-	playground_request: async (client, input) => {
-		const options: Record<string, unknown> = {
-			url: input['url'],
-			method: input['method'] ?? 'GET',
-		};
-		if (input['headers']) {
-			options['headers'] = input['headers'];
-		}
-		if (input['body']) {
-			options['body'] = input['body'];
-		}
-		return decodeHTTPResponse(await client.request(options as any));
-	},
-	playground_navigate: async (client, input) => {
-		await client.goTo(input['path'] as string);
-		const url = await client.getCurrentURL();
-		return { url };
-	},
-	playground_get_current_url: async (client) => ({
-		url: await client.getCurrentURL(),
-	}),
-	playground_get_site_info: (client) =>
-		executeSiteInfo(
-			async (code) => {
-				const resp = await client.run({ code });
-				return resp.text;
-			},
-			() => client.getCurrentURL()
-		),
-	playground_read_file: async (client, input) => ({
-		contents: await client.readFileAsText(input['path'] as string),
-	}),
-	playground_write_file: async (client, input) => {
-		await client.writeFile(
-			input['path'] as string,
-			input['contents'] as string
-		);
-		return { success: true };
-	},
-	playground_list_files: async (client, input) => ({
-		files: await client.listFiles(input['path'] as string),
-	}),
-	playground_mkdir: async (client, input) => {
-		await client.mkdirTree(input['path'] as string);
-		return { success: true };
-	},
-	playground_delete_file: async (client, input) => {
-		await client.unlink(input['path'] as string);
-		return { success: true };
-	},
-	playground_delete_directory: async (client, input) => {
-		await client.rmdir(input['path'] as string, {
-			recursive: (input['recursive'] as boolean) ?? false,
-		});
-		return { success: true };
-	},
-	playground_file_exists: async (client, input) => ({
-		exists: await client.fileExists(input['path'] as string),
-	}),
-};
-
 // -- Registration --
 
-export function registerWebMCPTools(config: WebMcpConfig): void {
+export function registerWebMCPTools(config: PlaygroundConfig): void {
 	if (typeof navigator === 'undefined' || !navigator.modelContext) {
 		return;
 	}
@@ -192,24 +68,25 @@ export function registerWebMCPTools(config: WebMcpConfig): void {
 	}
 
 	// Per-site tools
-	const tools: ModelContextTool[] = Object.values(toolDefinitions).map(
-		(def) => ({
-			name: def.name,
+	const tools: ModelContextTool[] = Object.entries(toolDefinitions).map(
+		([name, def]) => ({
+			name,
 			description: def.description,
 			inputSchema: paramsToJsonSchema(def.params),
 			annotations: def.annotations,
 			execute: async (input) => {
 				try {
-					const executor = clientMethodMap[def.name];
+					const executor = toolExecutors[name];
 					if (!executor) {
 						return {
-							error: `No executor for "${def.name}"`,
+							error: `No executor for "${name}"`,
 						};
 					}
-					return await executor(getActiveClient(), input);
+					const adapter = createToolClient(getActiveClient());
+					return await executor(adapter, input);
 				} catch (error) {
 					return {
-						error: `Error in ${def.name}: ${stringifyError(error)}`,
+						error: `${def.errorPrefix}: ${stringifyError(error)}`,
 					};
 				}
 			},
@@ -222,7 +99,9 @@ export function registerWebMCPTools(config: WebMcpConfig): void {
 	navigator.modelContext.provideContext({ tools });
 }
 
-function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
+function createSiteManagementTools(
+	config: PlaygroundConfig
+): ModelContextTool[] {
 	function getActiveSite() {
 		const sites = config.getSites();
 		const active = sites.find((s) => s.isActive);
@@ -238,7 +117,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 
 	const result: ModelContextTool[] = [
 		{
-			name: listDef.name,
+			name: 'playground_list_sites',
 			description: listDef.description,
 			annotations: listDef.annotations,
 			execute: async () => {
@@ -254,7 +133,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 					};
 				} catch (error) {
 					return {
-						error: `Error listing sites: ${stringifyError(error)}`,
+						error: `${listDef.errorPrefix}: ${stringifyError(error)}`,
 					};
 				}
 			},
@@ -263,7 +142,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 
 	if (config.saveSite) {
 		result.push({
-			name: saveDef.name,
+			name: 'playground_save_site',
 			description: saveDef.description,
 			annotations: saveDef.annotations,
 			execute: async () => {
@@ -289,7 +168,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 					};
 				} catch (error) {
 					return {
-						error: `Error saving site: ${stringifyError(error)}`,
+						error: `${saveDef.errorPrefix}: ${stringifyError(error)}`,
 					};
 				}
 			},
@@ -298,7 +177,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 
 	if (config.renameSite) {
 		result.push({
-			name: renameDef.name,
+			name: 'playground_rename_site',
 			description: renameDef.description,
 			inputSchema: paramsToJsonSchema(renameDef.params),
 			annotations: renameDef.annotations,
@@ -310,7 +189,7 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 					return { success: true, siteId: site.slug, newName };
 				} catch (error) {
 					return {
-						error: `Error renaming site: ${stringifyError(error)}`,
+						error: `${renameDef.errorPrefix}: ${stringifyError(error)}`,
 					};
 				}
 			},
