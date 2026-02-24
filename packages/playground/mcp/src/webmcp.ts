@@ -7,6 +7,7 @@
  */
 
 import type { PlaygroundClient } from '@wp-playground/remote';
+import type { PHPResponseData } from '@php-wasm/universal';
 import {
 	toolDefinitions,
 	siteToolDefinitions,
@@ -14,6 +15,8 @@ import {
 	executeSiteInfo,
 } from './tools/tool-definitions';
 import type { ToolParam } from './tools/tool-definitions';
+import { stringifyError } from './tools/utils';
+import type { PlaygroundConfig } from './config';
 
 // -- WebMCP type declarations --
 
@@ -45,19 +48,7 @@ declare global {
 	}
 }
 
-// -- Config --
-
-export interface WebMcpConfig {
-	getSites: () => Array<{
-		slug: string;
-		name: string;
-		storage: string;
-		isActive: boolean;
-	}>;
-	getPlaygroundClient: (siteSlug: string) => PlaygroundClient | undefined;
-	renameSite?: (siteSlug: string, newName: string) => Promise<void>;
-	saveSite?: (siteSlug: string) => Promise<{ slug: string; storage: string }>;
-}
+export type WebMcpConfig = PlaygroundConfig;
 
 // -- Schema conversion --
 
@@ -94,6 +85,22 @@ function paramsToJsonSchema(params: ToolParam[]): Record<string, unknown> {
 
 // -- Client method mapping --
 
+function decodePHPResponse(response: PHPResponseData) {
+	return {
+		text: new TextDecoder().decode(response.bytes),
+		errors: response.errors,
+		exitCode: response.exitCode,
+	};
+}
+
+function decodeHTTPResponse(response: PHPResponseData) {
+	return {
+		text: new TextDecoder().decode(response.bytes),
+		httpStatusCode: response.httpStatusCode,
+		headers: response.headers,
+	};
+}
+
 const clientMethodMap: Record<
 	string,
 	(
@@ -101,9 +108,9 @@ const clientMethodMap: Record<
 		input: Record<string, unknown>
 	) => Promise<unknown>
 > = {
-	playground_execute_php: (client, input) =>
-		client.run({ code: input['code'] as string }),
-	playground_request: (client, input) => {
+	playground_execute_php: async (client, input) =>
+		decodePHPResponse(await client.run({ code: input['code'] as string })),
+	playground_request: async (client, input) => {
 		const options: Record<string, unknown> = {
 			url: input['url'],
 			method: input['method'] ?? 'GET',
@@ -114,7 +121,7 @@ const clientMethodMap: Record<
 		if (input['body']) {
 			options['body'] = input['body'];
 		}
-		return client.request(options as any);
+		return decodeHTTPResponse(await client.request(options as any));
 	},
 	playground_navigate: (client, input) =>
 		client.goTo(input['path'] as string),
@@ -173,13 +180,19 @@ export function registerWebMCPTools(config: WebMcpConfig): void {
 			inputSchema: paramsToJsonSchema(def.params),
 			annotations: def.annotations,
 			execute: async (input) => {
-				const executor = clientMethodMap[def.name];
-				if (!executor) {
+				try {
+					const executor = clientMethodMap[def.name];
+					if (!executor) {
+						return {
+							error: `No executor for "${def.name}"`,
+						};
+					}
+					return await executor(getActiveClient(), input);
+				} catch (error) {
 					return {
-						error: `No executor for "${def.name}"`,
+						error: `Error in ${def.name}: ${stringifyError(error)}`,
 					};
 				}
-				return executor(getActiveClient(), input);
 			},
 		})
 	);
@@ -209,14 +222,22 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			name: listDef.name,
 			description: listDef.description,
 			annotations: listDef.annotations,
-			execute: async () => ({
-				sites: config.getSites().map((s) => ({
-					slug: s.slug,
-					name: s.name,
-					storage: presentStorage(s.storage),
-					isActive: s.isActive,
-				})),
-			}),
+			execute: async () => {
+				try {
+					return {
+						sites: config.getSites().map((s) => ({
+							slug: s.slug,
+							name: s.name,
+							storage: presentStorage(s.storage),
+							isActive: s.isActive,
+						})),
+					};
+				} catch (error) {
+					return {
+						error: `Error listing sites: ${stringifyError(error)}`,
+					};
+				}
+			},
 		},
 	];
 
@@ -226,13 +247,19 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			description: saveDef.description,
 			annotations: saveDef.annotations,
 			execute: async () => {
-				const slug = getActiveSiteSlug();
-				const saved = await config.saveSite!(slug);
-				return {
-					success: true,
-					slug: saved.slug,
-					storage: presentStorage(saved.storage),
-				};
+				try {
+					const slug = getActiveSiteSlug();
+					const saved = await config.saveSite!(slug);
+					return {
+						success: true,
+						slug: saved.slug,
+						storage: presentStorage(saved.storage),
+					};
+				} catch (error) {
+					return {
+						error: `Error saving site: ${stringifyError(error)}`,
+					};
+				}
 			},
 		});
 	}
@@ -244,9 +271,15 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			inputSchema: paramsToJsonSchema(renameDef.params),
 			annotations: renameDef.annotations,
 			execute: async (input) => {
-				const slug = getActiveSiteSlug();
-				await config.renameSite!(slug, input['newName'] as string);
-				return { success: true };
+				try {
+					const slug = getActiveSiteSlug();
+					await config.renameSite!(slug, input['newName'] as string);
+					return { success: true };
+				} catch (error) {
+					return {
+						error: `Error renaming site: ${stringifyError(error)}`,
+					};
+				}
 			},
 		});
 	}

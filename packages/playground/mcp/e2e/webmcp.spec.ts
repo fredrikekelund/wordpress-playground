@@ -125,13 +125,8 @@ test('WebMCP playground_execute_php runs PHP code', async ({ webmcpPage }) => {
 			code: '<?php echo "Hello WebMCP";',
 		});
 	});
-	// The raw PHPResponse has bytes as Uint8Array which
-	// gets JSON-serialized by evaluate(), so decode the
-	// text output from the serialized bytes.
-	const text = new TextDecoder().decode(
-		new Uint8Array(Object.values(result.bytes as Record<string, number>))
-	);
-	expect(text).toContain('Hello WebMCP');
+	expect(result.text).toContain('Hello WebMCP');
+	expect(result.exitCode).toBe(0);
 });
 
 test('WebMCP playground_read_file reads wp-config.php', async ({
