@@ -77,8 +77,12 @@ const test = base.extend<{ webmcpPage: Page }>({
 							const executors = (window as any).__webmcpExecutors;
 							if (!executors?.playground_get_current_url)
 								return false;
-							await executors.playground_get_current_url({});
-							return true;
+							const result =
+								await executors.playground_get_current_url({});
+							// The execute function catches errors and
+							// returns { error: "..." } instead of
+							// throwing. Check for a real URL object.
+							return typeof result?.url === 'string';
 						} catch {
 							return false;
 						}
@@ -138,19 +142,19 @@ test('WebMCP playground_read_file reads wp-config.php', async ({
 			path: '/wordpress/wp-config.php',
 		});
 	});
-	expect(result).toContain('DB_NAME');
+	expect(result.contents).toContain('DB_NAME');
 });
 
 test('WebMCP playground_file_exists checks existence', async ({
 	webmcpPage,
 }) => {
-	const exists = await webmcpPage.evaluate(async () => {
+	const result = await webmcpPage.evaluate(async () => {
 		const executors = (window as any).__webmcpExecutors;
 		return await executors['playground_file_exists']({
 			path: '/wordpress/wp-config.php',
 		});
 	});
-	expect(exists).toBe(true);
+	expect(result.exists).toBe(true);
 
 	const missing = await webmcpPage.evaluate(async () => {
 		const executors = (window as any).__webmcpExecutors;
@@ -158,18 +162,18 @@ test('WebMCP playground_file_exists checks existence', async ({
 			path: '/wordpress/nope.txt',
 		});
 	});
-	expect(missing).toBe(false);
+	expect(missing.exists).toBe(false);
 });
 
 test('WebMCP playground_get_current_url returns URL', async ({
 	webmcpPage,
 }) => {
-	const url = await webmcpPage.evaluate(async () => {
+	const result = await webmcpPage.evaluate(async () => {
 		const executors = (window as any).__webmcpExecutors;
 		return await executors['playground_get_current_url']({});
 	});
-	expect(url).toBeTruthy();
-	expect(typeof url).toBe('string');
+	expect(result.url).toBeTruthy();
+	expect(typeof result.url).toBe('string');
 });
 
 test('WebMCP playground_get_site_info returns WP info', async ({
@@ -189,10 +193,11 @@ test('WebMCP playground_list_sites returns sites', async ({ webmcpPage }) => {
 		const executors = (window as any).__webmcpExecutors;
 		return await executors['playground_list_sites']({});
 	});
+	expect(result.connectedTabs).toBe(1);
 	expect(result.sites).toBeInstanceOf(Array);
 	expect(result.sites.length).toBeGreaterThan(0);
 	const site = result.sites[0];
-	expect(site.slug).toBeTruthy();
+	expect(site.siteId).toBeTruthy();
 	expect(site.name).toBeTruthy();
 	expect(site.isActive).toBe(true);
 });
@@ -203,7 +208,10 @@ test('WebMCP playground_save_site saves a site', async ({ webmcpPage }) => {
 		return await executors['playground_save_site']({});
 	});
 	expect(result.success).toBe(true);
-	expect(result.slug).toBeTruthy();
+	expect(result.siteId).toBeTruthy();
+	expect(result.name).toBeTruthy();
+	expect(typeof result.alreadySaved).toBe('boolean');
+	expect(result.storage).toBeTruthy();
 });
 
 test('WebMCP playground_rename_site renames a site', async ({ webmcpPage }) => {
@@ -214,4 +222,6 @@ test('WebMCP playground_rename_site renames a site', async ({ webmcpPage }) => {
 		});
 	});
 	expect(result.success).toBe(true);
+	expect(result.siteId).toBeTruthy();
+	expect(result.newName).toBe('WebMCP Test Site');
 });

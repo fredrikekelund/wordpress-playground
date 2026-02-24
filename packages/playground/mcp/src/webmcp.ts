@@ -16,7 +16,7 @@ import {
 } from './tools/tool-definitions';
 import type { ToolParam } from './tools/tool-definitions';
 import { stringifyError } from './tools/utils';
-import type { PlaygroundConfig } from './config';
+import type { PlaygroundConfig } from './bridge-client';
 
 // -- WebMCP type declarations --
 
@@ -123,9 +123,14 @@ const clientMethodMap: Record<
 		}
 		return decodeHTTPResponse(await client.request(options as any));
 	},
-	playground_navigate: (client, input) =>
-		client.goTo(input['path'] as string),
-	playground_get_current_url: (client) => client.getCurrentURL(),
+	playground_navigate: async (client, input) => {
+		await client.goTo(input['path'] as string);
+		const url = await client.getCurrentURL();
+		return { url };
+	},
+	playground_get_current_url: async (client) => ({
+		url: await client.getCurrentURL(),
+	}),
 	playground_get_site_info: (client) =>
 		executeSiteInfo(
 			async (code) => {
@@ -134,22 +139,36 @@ const clientMethodMap: Record<
 			},
 			() => client.getCurrentURL()
 		),
-	playground_read_file: (client, input) =>
-		client.readFileAsText(input['path'] as string),
-	playground_write_file: (client, input) =>
-		client.writeFile(input['path'] as string, input['contents'] as string),
-	playground_list_files: (client, input) =>
-		client.listFiles(input['path'] as string),
-	playground_mkdir: (client, input) =>
-		client.mkdirTree(input['path'] as string),
-	playground_delete_file: (client, input) =>
-		client.unlink(input['path'] as string),
-	playground_delete_directory: (client, input) =>
-		client.rmdir(input['path'] as string, {
+	playground_read_file: async (client, input) => ({
+		contents: await client.readFileAsText(input['path'] as string),
+	}),
+	playground_write_file: async (client, input) => {
+		await client.writeFile(
+			input['path'] as string,
+			input['contents'] as string
+		);
+		return { success: true };
+	},
+	playground_list_files: async (client, input) => ({
+		files: await client.listFiles(input['path'] as string),
+	}),
+	playground_mkdir: async (client, input) => {
+		await client.mkdirTree(input['path'] as string);
+		return { success: true };
+	},
+	playground_delete_file: async (client, input) => {
+		await client.unlink(input['path'] as string);
+		return { success: true };
+	},
+	playground_delete_directory: async (client, input) => {
+		await client.rmdir(input['path'] as string, {
 			recursive: (input['recursive'] as boolean) ?? false,
-		}),
-	playground_file_exists: (client, input) =>
-		client.fileExists(input['path'] as string),
+		});
+		return { success: true };
+	},
+	playground_file_exists: async (client, input) => ({
+		exists: await client.fileExists(input['path'] as string),
+	}),
 };
 
 // -- Registration --
@@ -204,13 +223,13 @@ export function registerWebMCPTools(config: WebMcpConfig): void {
 }
 
 function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
-	function getActiveSiteSlug(): string {
+	function getActiveSite() {
 		const sites = config.getSites();
 		const active = sites.find((s) => s.isActive);
 		if (!active) {
 			throw new Error('No active Playground site');
 		}
-		return active.slug;
+		return active;
 	}
 
 	const listDef = siteToolDefinitions['playground_list_sites'];
@@ -225,8 +244,9 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			execute: async () => {
 				try {
 					return {
+						connectedTabs: 1,
 						sites: config.getSites().map((s) => ({
-							slug: s.slug,
+							siteId: s.slug,
 							name: s.name,
 							storage: presentStorage(s.storage),
 							isActive: s.isActive,
@@ -248,11 +268,23 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			annotations: saveDef.annotations,
 			execute: async () => {
 				try {
-					const slug = getActiveSiteSlug();
-					const saved = await config.saveSite!(slug);
+					const site = getActiveSite();
+					const storage = presentStorage(site.storage);
+					if (storage !== 'temporary') {
+						return {
+							success: true,
+							alreadySaved: true,
+							siteId: site.slug,
+							name: site.name,
+							storage,
+						};
+					}
+					const saved = await config.saveSite!(site.slug);
 					return {
 						success: true,
-						slug: saved.slug,
+						alreadySaved: false,
+						siteId: saved.slug,
+						name: site.name,
 						storage: presentStorage(saved.storage),
 					};
 				} catch (error) {
@@ -272,9 +304,10 @@ function createSiteManagementTools(config: WebMcpConfig): ModelContextTool[] {
 			annotations: renameDef.annotations,
 			execute: async (input) => {
 				try {
-					const slug = getActiveSiteSlug();
-					await config.renameSite!(slug, input['newName'] as string);
-					return { success: true };
+					const site = getActiveSite();
+					const newName = input['newName'] as string;
+					await config.renameSite!(site.slug, newName);
+					return { success: true, siteId: site.slug, newName };
 				} catch (error) {
 					return {
 						error: `Error renaming site: ${stringifyError(error)}`,
