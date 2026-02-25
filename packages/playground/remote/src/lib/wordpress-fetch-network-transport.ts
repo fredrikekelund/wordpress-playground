@@ -185,6 +185,11 @@ export class WordPressFetchNetworkTransport {
 				require_once '/wordpress/wp-admin/includes/misc.php';
 				require_once '/wordpress/wp-admin/includes/dashboard.php';
 				add_filter('pre_http_request', function($pre, $r, $url) {
+					$parsed = parse_url($url);
+					$host = isset($parsed['host']) ? $parsed['host'] : '';
+					if ($host === 'localhost' || $host === '127.0.0.1' || $host === '::1' || $host === '[::1]') {
+						return new WP_Error( 'http_request_block', 'Loopback requests are not pre-fetched' );
+					}
 					post_message_to_js(json_encode([
 						'type' => 'parallelize_request',
 						'url' => $url,
