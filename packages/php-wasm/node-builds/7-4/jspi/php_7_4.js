@@ -206,6 +206,7 @@ export function init(RuntimeName, PHPLoader) {
 		runtimeInitialized = true;
 		callRuntimeCallbacks(__RELOC_FUNCS__);
 		// Begin ATINITS hooks
+		callRuntimeCallbacks(onInits);
 		if (!Module['noFSInit'] && !FS.initialized) FS.init();
 		TTY.init();
 		SOCKFS.root = FS.mount(SOCKFS, {}, null);
@@ -6065,6 +6066,10 @@ export function init(RuntimeName, PHPLoader) {
 	___syscall_chmod.sig = 'ipi';
 
 	var allocateUTF8OnStack = (...args) => stringToUTF8OnStack(...args);
+
+	var onInits = [];
+
+	var addOnInit = (cb) => onInits.push(cb);
 
 	function _js_getpid() {
 		return PHPLoader.processId ?? 42;
